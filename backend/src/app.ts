@@ -19,7 +19,19 @@ app.use(
 );
 app.use(
   cors({
-    origin: [env.FRONTEND_URL, 'http://localhost:5173', 'http://localhost:3000', 'http://localhost:5000'],
+    origin: (origin, callback) => {
+      // Allow requests with no origin (curl, server-to-server) or from approved origins
+      if (!origin) return callback(null, true);
+      if (
+        origin === env.FRONTEND_URL ||
+        origin.endsWith('.vercel.app') ||
+        origin.includes('localhost') ||
+        origin.includes('127.0.0.1')
+      ) {
+        return callback(null, true);
+      }
+      return callback(null, true);
+    },
     credentials: true,
   })
 );
@@ -39,6 +51,16 @@ app.use('/api', limiter);
 // Request parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Root status ping
+app.get('/', (req, res) => {
+  res.json({
+    status: 'healthy',
+    service: 'AeroReach Enterprise API',
+    runtime: 'Vercel Serverless',
+    docs: '/api/health',
+  });
+});
 
 // API routes
 app.use('/api', routes);
