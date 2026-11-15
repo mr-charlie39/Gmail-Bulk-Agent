@@ -1,0 +1,163 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  ADMIN
+  USER
+}
+
+enum AccountStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model User {
+  id                 String             @id @default(uuid())
+  fullName           String             @default("User")
+  email              String             @unique
+  passwordHash       String
+  role               Role               @default(USER)
+  status             AccountStatus      @default(ACTIVE)
+  mustChangePassword Boolean            @default(true)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  lastLoginAt        DateTime?
+
+  gmailConnection    GmailConnection?
+  recipients         Recipient[]
+  campaigns          Campaign[]
+  generatedEmails    GeneratedEmail[]
+  sentEmails         SentEmail[]
+  followUps          FollowUp[]
+  suppressionEntries SuppressionEntry[]
+  auditLogs          AuditLog[]         @relation("ActorAuditLogs")
+}
+
+model GmailConnection {
+  id                    String    @id @default(uuid())
+  userId                String    @unique
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  gmailAddress          String
+  encryptedRefreshToken String
+  iv                    String
+  authTag               String
+  tokenVersion          Int       @default(1)
+  connected             Boolean   @default(true)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+}
+
+model Recipient {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String?
+  email     String
+  company   String?
+  category  String?  @default("GENERAL") // ENTERPRISE, STARTUP, INVESTOR, RECRUITER, GENERAL
+  website   String?
+  status    String   @default("ACTIVE") // ACTIVE, UNSUBSCRIBED, BOUNCED
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  generatedEmails GeneratedEmail[]
+  sentEmails      SentEmail[]
+  followUps       FollowUp[]
+
+  @@unique([userId, email])
+}
+
+model Campaign {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name            String
+  promptTemplate  String?
+  subjectTemplate String?
+  status          String   @default("DRAFT") // DRAFT, ACTIVE, PAUSED, COMPLETED
+  totalRecipients Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  generatedEmails GeneratedEmail[]
+  sentEmails      SentEmail[]
+  followUps       FollowUp[]
+}
+
+model GeneratedEmail {
+  id              String    @id @default(uuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaignId      String?
+  campaign        Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  recipientId     String
+  recipient       Recipient @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  subject         String
+  body            String
+  bodyHtml        String?
+  approvalStatus  String    @default("PENDING_APPROVAL") // PENDING_APPROVAL, APPROVED, REJECTED
+  rejectionReason String?
+  approvedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model SentEmail {
+  id             String    @id @default(uuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaignId     String?
+  campaign       Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  recipientId    String
+  recipient      Recipient @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  subject        String?
+  gmailMessageId String?
+  gmailThreadId  String?
+  status         String    @default("SENT") // SENT, FAILED
+  sentAt         DateTime  @default(now())
+  errorMessage   String?
+}
+
+model FollowUp {
+  id             String    @id @default(uuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaignId     String?
+  campaign       Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  recipientId    String
+  recipient      Recipient @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  promptTemplate String?
+  delayDays      Int       @default(3)
+  scheduledAt    DateTime
+  status         String    @default("SCHEDULED") // SCHEDULED, SENT, CANCELLED
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  actorUserId  String?
+  actor        User?    @relation("ActorAuditLogs", fields: [actorUserId], references: [id], onDelete: SetNull)
+  action       String
+  targetUserId String?
+  metadata     Json?
+  ipAddress    String?
+  createdAt    DateTime @default(now())
+}
+
+model SuppressionEntry {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email     String
+  reason    String   // UNSUBSCRIBE, BOUNCE, MANUAL, COMPLAINT
+  createdAt DateTime @default(now())
+
+  @@unique([userId, email])
+}

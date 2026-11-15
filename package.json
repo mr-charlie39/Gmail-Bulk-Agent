@@ -1,0 +1,16 @@
+{
+  "name": "email-outreach-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Enterprise-grade AI-powered email outreach agent with Google OAuth, Gmail API, human-in-the-loop approval, and PostgreSQL",
+  "scripts": {
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build:backend": "cd backend && npm run build",
+    "build:frontend": "cd frontend && npm run build",
+    "start": "cd backend && npm start"
+  },
+  "keywords": ["ai", "outreach", "gmail", "automation", "gemini", "oauth2", "typescript"],
+  "author": "",
+  "license": "ISC"
+}
