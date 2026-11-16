@@ -71,8 +71,8 @@ export const ApprovalQueue: React.FC = () => {
 
   const handleSelect = (email: EmailMessage) => {
     setSelectedEmail(email);
-    setEditedSubject(email.subject);
-    setEditedBody(email.bodyText);
+    setEditedSubject(email.subject || '');
+    setEditedBody(email.bodyText || (email as any).body || '');
     setIsEditing(false);
   };
 
@@ -144,9 +144,16 @@ export const ApprovalQueue: React.FC = () => {
                         {email.recipient?.category || 'PROSPECT'}
                       </span>
                     </div>
-                    <p className="text-xs text-slate-400 font-medium truncate mt-1">
-                      {email.subject}
-                    </p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <p className="text-xs text-slate-400 font-medium truncate flex-1">
+                        {email.subject}
+                      </p>
+                      {(email as any).slopScore !== undefined && (email as any).slopScore !== null && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-800 text-emerald-400 border border-slate-700 shrink-0">
+                          {(email as any).slopScore}/5
+                        </span>
+                      )}
+                    </div>
                     <div className="flex items-center justify-between mt-2 text-[10px] text-slate-500">
                       <span>{email.recipient?.company || 'Organization'}</span>
                       <span>{new Date(email.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
@@ -159,7 +166,7 @@ export const ApprovalQueue: React.FC = () => {
                 <CheckCircle2 className="h-10 w-10 text-emerald-400 mb-3" />
                 <h4 className="text-sm font-semibold text-slate-200">Review Queue is Clear</h4>
                 <p className="text-xs text-slate-400 mt-1 max-w-xs">
-                  All generated emails have been approved or dispatched. Head over to AI Studio to generate new outreach campaigns.
+                  All generated emails have been approved or dispatched. Head over to Composition Studio to generate new outreach campaigns.
                 </p>
               </div>
             )}
@@ -256,7 +263,7 @@ export const ApprovalQueue: React.FC = () => {
                     </div>
                   ) : (
                     <div className="p-4 rounded-xl bg-slate-800/40 border border-slate-800 text-sm text-slate-200 leading-relaxed whitespace-pre-wrap font-sans">
-                      {selectedEmail.bodyText}
+                      {selectedEmail.bodyText || (selectedEmail as any).body}
                     </div>
                   )}
                 </div>

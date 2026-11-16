@@ -43,9 +43,9 @@ export class AdminController {
         prisma.gmailConnection.count({ where: { connected: true } }),
         prisma.campaign.count(),
         prisma.generatedEmail.count(),
-        prisma.sentEmail.count({ where: { status: 'SENT' } }),
+        prisma.sentEmail.count({ where: { status: { in: ['SENT', 'GMAIL_ACCEPTED'] } } }),
         prisma.sentEmail.count({ where: { status: 'FAILED' } }),
-        prisma.generatedEmail.count({ where: { approvalStatus: 'PENDING_APPROVAL' } }),
+        prisma.generatedEmail.count({ where: { approvalStatus: { in: ['PENDING_APPROVAL', 'DRAFT', 'QUALITY_CHECKED'] } } }),
       ]);
 
       const recentAuditLogs = await prisma.auditLog.findMany({

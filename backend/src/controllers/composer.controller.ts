@@ -42,7 +42,10 @@ export class ComposerController {
         campaignId,
       });
 
-      res.status(201).json(result);
+      res.status(201).json({
+        ...result,
+        draft: result.generatedEmail,
+      });
     } catch (error) {
       next(error);
     }
@@ -134,8 +137,8 @@ export class ComposerController {
           slopScore: slopResult.score,
           slopClean: slopResult.clean,
           slopReport: slopResult.rawReport,
-          status: slopResult.clean ? 'QUALITY_CHECKED' : 'DRAFT',
-          approvalStatus: slopResult.clean ? 'QUALITY_CHECKED' : 'DRAFT',
+          status: 'PENDING_APPROVAL',
+          approvalStatus: 'PENDING_APPROVAL',
         },
         include: {
           recipient: true,
@@ -143,8 +146,14 @@ export class ComposerController {
         },
       });
 
+      const enriched = {
+        ...updated,
+        bodyText: updated.body,
+      };
+
       res.json({
-        draft: updated,
+        draft: enriched,
+        generatedEmail: enriched,
         slopResult,
       });
     } catch (error) {

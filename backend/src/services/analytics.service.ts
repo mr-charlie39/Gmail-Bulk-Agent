@@ -8,8 +8,8 @@ export class AnalyticsService {
     const [totalGenerated, sent, pending, approved, rejected, failed, totalRecipients, campaigns] =
       await Promise.all([
         prisma.generatedEmail.count({ where: { userId } }),
-        prisma.sentEmail.count({ where: { userId, status: 'SENT' } }),
-        prisma.generatedEmail.count({ where: { userId, approvalStatus: 'PENDING_APPROVAL' } }),
+        prisma.sentEmail.count({ where: { userId, status: { in: ['SENT', 'GMAIL_ACCEPTED'] } } }),
+        prisma.generatedEmail.count({ where: { userId, approvalStatus: { in: ['PENDING_APPROVAL', 'DRAFT', 'QUALITY_CHECKED'] } } }),
         prisma.generatedEmail.count({ where: { userId, approvalStatus: 'APPROVED' } }),
         prisma.generatedEmail.count({ where: { userId, approvalStatus: 'REJECTED' } }),
         prisma.sentEmail.count({ where: { userId, status: 'FAILED' } }),

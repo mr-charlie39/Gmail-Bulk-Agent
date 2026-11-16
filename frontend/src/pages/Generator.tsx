@@ -61,11 +61,14 @@ export const Generator: React.FC = () => {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['pendingApproval'] });
       queryClient.invalidateQueries({ queryKey: ['analyticsOverview'] });
-      setActiveDraft(data.draft);
-      setSubjectText(data.draft.subject);
-      setBodyText(data.draft.body);
-      setSlopResult(data.slopResult);
-      setSuccessMessage('Draft generated deterministically with zero AI API costs & checked via SlopMonster.');
+      const draft = data.draft || data.generatedEmail;
+      if (draft) {
+        setActiveDraft(draft);
+        setSubjectText(draft.subject || '');
+        setBodyText(draft.body || draft.bodyText || '');
+      }
+      setSlopResult(data.slopResult || null);
+      setSuccessMessage('Draft generated deterministically and queued for human approval.');
     },
     onError: (err: any) => {
       const msg = err.response?.data?.error || err.message || 'Draft generation failed';

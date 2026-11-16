@@ -166,6 +166,7 @@ export const BUILTIN_TEMPLATES: EmailTemplateDefinition[] = [
 
 export interface EmailCompositionResult {
   generatedEmail: any;
+  draft?: any;
   slopResult: SlopMonsterResult;
   usedTemplate: EmailTemplateDefinition;
 }
@@ -385,9 +386,7 @@ export class EmailTemplateService {
     // 5. Run SlopMonster local quality check
     const slopResult = await SlopMonsterService.checkCopy(`${subject}\n\n${bodyText}`);
 
-    // 6. Save in GeneratedEmail table with status
-    const initialStatus = slopResult.clean ? 'QUALITY_CHECKED' : 'DRAFT';
-
+    // 6. Save in GeneratedEmail table with PENDING_APPROVAL status for review queue
     const generatedEmail = await prisma.generatedEmail.create({
       data: {
         userId: params.userId,
@@ -398,8 +397,8 @@ export class EmailTemplateService {
         subject,
         body: bodyText,
         bodyHtml,
-        status: initialStatus,
-        approvalStatus: initialStatus,
+        status: 'PENDING_APPROVAL',
+        approvalStatus: 'PENDING_APPROVAL',
         slopScore: slopResult.score,
         slopClean: slopResult.clean,
         slopReport: slopResult.rawReport,
@@ -423,8 +422,14 @@ export class EmailTemplateService {
       },
     });
 
+    const enrichedEmail = {
+      ...generatedEmail,
+      bodyText: generatedEmail.body,
+    };
+
     return {
-      generatedEmail,
+      generatedEmail: enrichedEmail,
+      draft: enrichedEmail,
       slopResult,
       usedTemplate: chosenTemplate,
     };

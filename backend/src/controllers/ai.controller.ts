@@ -16,7 +16,10 @@ export class AIController {
         campaignId: validated.campaignId,
         customInstructions: validated.customInstructions,
       });
-      res.json(result);
+      res.json({
+        ...result,
+        draft: result.generatedEmail,
+      });
     } catch (error) {
       next(error);
     }

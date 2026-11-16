@@ -8,10 +8,16 @@ export class EmailApprovalService {
    * Retrieves pending emails requiring human review for the authenticated user
    */
   public static async getPendingApproval(userId: string) {
-    return prisma.generatedEmail.findMany({
+    const list = await prisma.generatedEmail.findMany({
       where: {
         userId,
-        approvalStatus: 'PENDING_APPROVAL',
+        OR: [
+          { approvalStatus: { in: ['PENDING_APPROVAL', 'DRAFT', 'QUALITY_CHECKED'] } },
+          { status: { in: ['PENDING_APPROVAL', 'DRAFT', 'QUALITY_CHECKED'] } },
+        ],
+        NOT: {
+          approvalStatus: { in: ['APPROVED', 'GMAIL_ACCEPTED', 'SENT', 'REJECTED'] },
+        },
       },
       include: {
         recipient: true,
@@ -19,6 +25,11 @@ export class EmailApprovalService {
       },
       orderBy: { createdAt: 'desc' },
     });
+
+    return list.map((item) => ({
+      ...item,
+      bodyText: item.body || '',
+    }));
   }
 
   /**
@@ -37,20 +48,32 @@ export class EmailApprovalService {
       throw new Error('Tenant Violation: Email draft not found or unauthorized access.');
     }
 
-    if (email.approvalStatus === 'SENT') {
+    if (email.approvalStatus === 'SENT' || email.approvalStatus === 'GMAIL_ACCEPTED') {
       throw new Error('Cannot edit an email that has already been dispatched.');
     }
 
-    return prisma.generatedEmail.update({
+    const newBody = updates.bodyText !== undefined ? updates.bodyText : email.body;
+    const newHtml =
+      updates.bodyHtml !== undefined
+        ? updates.bodyHtml
+        : `<div>${newBody.replace(/\n\n/g, '<br/><br/>').replace(/\n/g, '<br/>')}</div>`;
+
+    const updated = await prisma.generatedEmail.update({
       where: { id: emailId },
       data: {
         subject: updates.subject !== undefined ? updates.subject : email.subject,
-        body: updates.bodyText !== undefined ? updates.bodyText : email.body,
-        bodyHtml: updates.bodyHtml !== undefined ? updates.bodyHtml : email.bodyHtml,
+        body: newBody,
+        bodyHtml: newHtml,
         approvalStatus: 'PENDING_APPROVAL',
+        status: 'PENDING_APPROVAL',
       },
       include: { recipient: true, campaign: true },
     });
+
+    return {
+      ...updated,
+      bodyText: updated.body,
+    };
   }
 
   /**
@@ -72,6 +95,7 @@ export class EmailApprovalService {
     const updated = await prisma.generatedEmail.update({
       where: { id: emailId },
       data: {
+        status: 'APPROVED',
         approvalStatus: 'APPROVED',
         approvedAt: new Date(),
       },
@@ -90,7 +114,10 @@ export class EmailApprovalService {
       return GmailService.sendApprovedEmail(emailId, userId);
     }
 
-    return updated;
+    return {
+      ...updated,
+      bodyText: updated.body,
+    };
   }
 
   /**
@@ -108,6 +135,7 @@ export class EmailApprovalService {
     const updated = await prisma.generatedEmail.update({
       where: { id: emailId },
       data: {
+        status: 'REJECTED',
         approvalStatus: 'REJECTED',
         rejectionReason: reason || 'Rejected by user',
       },
@@ -120,7 +148,10 @@ export class EmailApprovalService {
       metadata: { generatedEmailId: emailId, reason },
     });
 
-    return updated;
+    return {
+      ...updated,
+      bodyText: updated.body,
+    };
   }
 
   /**
