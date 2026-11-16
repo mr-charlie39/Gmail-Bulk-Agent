@@ -30,6 +30,8 @@ model User {
   updatedAt          DateTime           @updatedAt
   lastLoginAt        DateTime?
 
+  profile            UserProfile?
+  templates          EmailTemplate[]
   gmailConnection    GmailConnection?
   recipients         Recipient[]
   campaigns          Campaign[]
@@ -38,6 +40,43 @@ model User {
   followUps          FollowUp[]
   suppressionEntries SuppressionEntry[]
   auditLogs          AuditLog[]         @relation("ActorAuditLogs")
+}
+
+model UserProfile {
+  id                String   @id @default(uuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName          String
+  professionalTitle String?
+  location          String?
+  shortBio          String?
+  skills            String?
+  servicesOffered   String?
+  portfolioUrl      String?
+  linkedinUrl       String?
+  githubUrl         String?
+  signature         String?
+  writingStyle      String?  @default("Direct, concise, professional")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model EmailTemplate {
+  id               String   @id @default(uuid())
+  userId           String?
+  user             User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name             String
+  category         String   // SOFTWARE_DEV, WEB_DEV, CUSTOM_SOFTWARE, RESTAURANT_POS, etc.
+  description      String?
+  subjectTemplate  String
+  openingSentence  String
+  reasonForContact String
+  relevantService  String
+  portfolioInfo    String?
+  naturalClosing   String
+  isCustom         Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 }
 
 model GmailConnection {
@@ -61,6 +100,7 @@ model Recipient {
   name      String?
   email     String
   company   String?
+  industry  String?
   category  String?  @default("GENERAL") // ENTERPRISE, STARTUP, INVESTOR, RECRUITER, GENERAL
   website   String?
   status    String   @default("ACTIVE") // ACTIVE, UNSUBSCRIBED, BOUNCED
@@ -99,12 +139,19 @@ model GeneratedEmail {
   campaign        Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   recipientId     String
   recipient       Recipient @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  templateId      String?
+  templateKey     String?
   subject         String
   body            String
   bodyHtml        String?
-  approvalStatus  String    @default("PENDING_APPROVAL") // PENDING_APPROVAL, APPROVED, REJECTED
+  status          String    @default("DRAFT") // DRAFT, QUALITY_CHECKED, APPROVED, QUEUED, GMAIL_ACCEPTED, FAILED, BOUNCED, CANCELLED
+  approvalStatus  String    @default("DRAFT") // Backward compatibility
+  slopScore       Int?
+  slopClean       Boolean?  @default(false)
+  slopReport      String?
   rejectionReason String?
   approvedAt      DateTime?
+  sentAt          DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 }
@@ -120,7 +167,7 @@ model SentEmail {
   subject        String?
   gmailMessageId String?
   gmailThreadId  String?
-  status         String    @default("SENT") // SENT, FAILED
+  status         String    @default("GMAIL_ACCEPTED") // GMAIL_ACCEPTED, FAILED, BOUNCED
   sentAt         DateTime  @default(now())
   errorMessage   String?
 }

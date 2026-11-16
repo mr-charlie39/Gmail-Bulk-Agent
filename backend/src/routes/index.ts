@@ -3,6 +3,8 @@ import authRoutes from './auth.routes';
 import googleAuthRoutes from './googleAuth.routes';
 import adminRoutes from './admin.routes';
 import userRoutes from './user.routes';
+import composerRoutes from './composer.routes';
+import profileRoutes from './profile.routes';
 
 // Existing modular routes for backward compatibility
 import aiRoutes from './ai.routes';
@@ -24,7 +26,11 @@ router.use('/auth', googleAuthRoutes);
 router.use('/admin', adminRoutes);
 router.use('/user', userRoutes);
 
-// 3. Modular Direct Routes (Protected via Authenticated User)
+// 3. SlopMonster & Email Composition Services
+router.use('/composer', composerRoutes);
+router.use('/profile', profileRoutes);
+
+// 4. Modular Direct Routes (Protected via Authenticated User)
 router.use('/ai', aiRoutes);
 router.use('/approval', approvalRoutes);
 router.use('/emails', emailRoutes);

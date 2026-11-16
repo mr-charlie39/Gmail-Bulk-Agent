@@ -2,27 +2,49 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
-  Sparkles,
+  FileText,
   Users,
   Layers,
   ArrowRight,
   CheckCircle2,
   AlertCircle,
-  HelpCircle
+  ShieldCheck,
+  Search,
+  Sparkles,
+  Send,
+  Eye,
+  RefreshCw,
+  Sliders,
+  Check,
+  AlertTriangle
 } from 'lucide-react';
-import { aiApi, recipientApi, campaignApi } from '../services/api';
-import { Recipient, Campaign } from '../types';
+import { composerApi, recipientApi, campaignApi } from '../services/api';
+import { Recipient, Campaign, EmailTemplate, SlopMonsterResult } from '../types';
 
 export const Generator: React.FC = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
+  const [selectedTemplateKey, setSelectedTemplateKey] = useState('WEB_DEV');
   const [selectedRecipientId, setSelectedRecipientId] = useState('');
   const [selectedCampaignId, setSelectedCampaignId] = useState('');
   const [customInstructions, setCustomInstructions] = useState('');
   const [batchMode, setBatchMode] = useState(false);
   const [selectedBatchIds, setSelectedBatchIds] = useState<string[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // Live draft preview / editor
+  const [activeDraft, setActiveDraft] = useState<any | null>(null);
+  const [subjectText, setSubjectText] = useState('');
+  const [bodyText, setBodyText] = useState('');
+  const [slopResult, setSlopResult] = useState<SlopMonsterResult | null>(null);
+  const [isCheckingSlop, setIsCheckingSlop] = useState(false);
+
+  const { data: templates } = useQuery<EmailTemplate[]>({
+    queryKey: ['composerTemplates'],
+    queryFn: composerApi.getTemplates,
+  });
 
   const { data: recipients } = useQuery<Recipient[]>({
     queryKey: ['recipientsList'],
@@ -35,33 +57,70 @@ export const Generator: React.FC = () => {
   });
 
   const generateSingleMutation = useMutation({
-    mutationFn: aiApi.generate,
-    onSuccess: () => {
+    mutationFn: composerApi.generateDraft,
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['pendingApproval'] });
       queryClient.invalidateQueries({ queryKey: ['analyticsOverview'] });
-      navigate('/approval');
+      setActiveDraft(data.draft);
+      setSubjectText(data.draft.subject);
+      setBodyText(data.draft.body);
+      setSlopResult(data.slopResult);
+      setSuccessMessage('Draft generated deterministically with zero AI API costs & checked via SlopMonster.');
     },
     onError: (err: any) => {
-      const msg = err.response?.data?.error || err.message || 'Generation failed';
+      const msg = err.response?.data?.error || err.message || 'Draft generation failed';
       setErrorMessage(msg);
     },
   });
 
   const generateBatchMutation = useMutation({
-    mutationFn: aiApi.batchGenerate,
-    onSuccess: () => {
+    mutationFn: composerApi.batchGenerate,
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['pendingApproval'] });
       queryClient.invalidateQueries({ queryKey: ['analyticsOverview'] });
-      navigate('/approval');
+      setSuccessMessage(`Successfully composed ${data.results.length} drafts! Forwarding to Approval Queue...`);
+      setTimeout(() => navigate('/approval'), 1500);
     },
     onError: (err: any) => {
-      const msg = err.response?.data?.error || err.message || 'Batch generation failed';
+      const msg = err.response?.data?.error || err.message || 'Batch composition failed';
       setErrorMessage(msg);
+    },
+  });
+
+  const checkSlopMutation = useMutation({
+    mutationFn: composerApi.checkCopyQuality,
+    onSuccess: (data) => {
+      setSlopResult(data);
+      setIsCheckingSlop(false);
+    },
+    onError: (err: any) => {
+      setIsCheckingSlop(false);
+      setErrorMessage(err.response?.data?.error || 'SlopMonster checker execution failed.');
+    },
+  });
+
+  const approveDraftMutation = useMutation({
+    mutationFn: ({ id, sendImmediately }: { id: string; sendImmediately: boolean }) =>
+      composerApi.approveDraft(id, sendImmediately),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['pendingApproval'] });
+      queryClient.invalidateQueries({ queryKey: ['emailHistory'] });
+      queryClient.invalidateQueries({ queryKey: ['analyticsOverview'] });
+      if (data.dispatched) {
+        setSuccessMessage('Email successfully accepted by Gmail API for transmission!');
+      } else {
+        setSuccessMessage('Draft approved and queued for sending.');
+      }
+      setTimeout(() => navigate('/approval'), 1200);
+    },
+    onError: (err: any) => {
+      setErrorMessage(err.response?.data?.error || 'Approval failed.');
     },
   });
 
   const handleGenerate = () => {
     setErrorMessage(null);
+    setSuccessMessage(null);
     const validCampaignId =
       selectedCampaignId && selectedCampaignId.trim() !== '' ? selectedCampaignId.trim() : undefined;
 
@@ -69,6 +128,7 @@ export const Generator: React.FC = () => {
       if (selectedBatchIds.length === 0) return;
       generateBatchMutation.mutate({
         recipientIds: selectedBatchIds,
+        templateKeyOrId: selectedTemplateKey,
         campaignId: validCampaignId,
         customInstructions: customInstructions ? customInstructions.trim() : undefined,
       });
@@ -76,10 +136,21 @@ export const Generator: React.FC = () => {
       if (!selectedRecipientId) return;
       generateSingleMutation.mutate({
         recipientId: selectedRecipientId,
+        templateKeyOrId: selectedTemplateKey,
         campaignId: validCampaignId,
         customInstructions: customInstructions ? customInstructions.trim() : undefined,
       });
     }
+  };
+
+  const handleManualSlopCheck = () => {
+    if (!bodyText.trim()) return;
+    setIsCheckingSlop(true);
+    setErrorMessage(null);
+    checkSlopMutation.mutate({
+      subject: subjectText,
+      bodyText: bodyText,
+    });
   };
 
   const handleToggleBatchRecipient = (id: string) => {
@@ -91,14 +162,14 @@ export const Generator: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto">
+    <div className="space-y-6 max-w-6xl mx-auto">
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2.5">
-          <Sparkles className="h-6 w-6 text-brand-400" />
-          AI Email Generation Studio
+          <FileText className="h-6 w-6 text-brand-400" />
+          Email Composition Studio
         </h1>
         <p className="text-sm text-slate-400 mt-1">
-          Powered by Google Gemini 1.5. Generates targeted, category-aware drafts and queues them directly into your approval workflow.
+          Free, deterministic, template-based email generation integrated with local SlopMonster quality verification. Zero AI API costs, zero external writing calls.
         </p>
       </div>
 
@@ -109,13 +180,20 @@ export const Generator: React.FC = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Configuration Form */}
-        <div className="lg:col-span-2 bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 space-y-5">
+      {successMessage && (
+        <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2.5">
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+          <span>{successMessage}</span>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Left Form: Template and Target Selection */}
+        <div className="lg:col-span-5 bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 space-y-5">
           {/* Generation Mode Toggle */}
           <div className="flex items-center justify-between pb-4 border-b border-slate-800">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
-              Target Selection Mode
+              Outreach Mode
             </span>
             <div className="flex items-center gap-2 p-1 rounded-xl bg-slate-800/60 border border-slate-700/60 text-xs">
               <button
@@ -125,7 +203,7 @@ export const Generator: React.FC = () => {
                   !batchMode ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-white'
                 }`}
               >
-                Single Recipient
+                Single Contact
               </button>
               <button
                 type="button"
@@ -134,9 +212,28 @@ export const Generator: React.FC = () => {
                   batchMode ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-white'
                 }`}
               >
-                Batch Recipients
+                Batch Contacts
               </button>
             </div>
+          </div>
+
+          {/* Template Selection */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1.5 flex items-center gap-1.5">
+              <Sliders className="h-3.5 w-3.5 text-brand-400" />
+              Email Template (Zero-AI Deterministic)
+            </label>
+            <select
+              value={selectedTemplateKey}
+              onChange={(e) => setSelectedTemplateKey(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white focus:outline-none focus:border-brand-500"
+            >
+              {templates?.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name} ({t.category})
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Campaign Selector */}
@@ -150,7 +247,7 @@ export const Generator: React.FC = () => {
               onChange={(e) => setSelectedCampaignId(e.target.value)}
               className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white focus:outline-none focus:border-brand-500"
             >
-              <option value="">-- No specific campaign (General Outreach) --</option>
+              <option value="">-- No specific campaign (Direct Outreach) --</option>
               {campaigns?.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -174,7 +271,7 @@ export const Generator: React.FC = () => {
                 <option value="">-- Choose recipient from database --</option>
                 {recipients?.map((r) => (
                   <option key={r.id} value={r.id}>
-                    {r.firstName ? `${r.firstName} ${r.lastName} (${r.company || r.email})` : r.email} — [{r.category || 'GENERAL'}]
+                    {r.firstName ? `${r.firstName} ${r.lastName} (${r.company || r.email})` : r.email}
                   </option>
                 ))}
               </select>
@@ -221,9 +318,6 @@ export const Generator: React.FC = () => {
                           </span>
                           <span className="text-slate-400">({r.company || 'N/A'})</span>
                         </div>
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400">
-                          {r.category || 'GENERAL'}
-                        </span>
                       </label>
                     );
                   })
@@ -234,21 +328,21 @@ export const Generator: React.FC = () => {
             </div>
           )}
 
-          {/* Custom Prompt Instructions */}
+          {/* Custom Notes */}
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-              Specific Angles or Custom Instructions (Optional)
+              Specific Angle or Contextual Note (Optional)
             </label>
-            <textarea
-              rows={4}
+            <input
+              type="text"
               value={customInstructions}
               onChange={(e) => setCustomInstructions(e.target.value)}
-              placeholder="e.g., Emphasize our recent cloud security benchmark, reference their Q3 expansion, or suggest a 10-minute briefing on Tuesday..."
-              className="w-full p-3.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white focus:outline-none focus:border-brand-500 leading-relaxed"
+              placeholder="e.g., Reference their recent product launch or portfolio redesign..."
+              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white focus:outline-none focus:border-brand-500"
             />
           </div>
 
-          {/* Submit Button */}
+          {/* Compose Button */}
           <div className="pt-2">
             <button
               onClick={handleGenerate}
@@ -261,11 +355,11 @@ export const Generator: React.FC = () => {
               className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white font-bold text-sm shadow-lg shadow-brand-500/25 flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {generateSingleMutation.isPending || generateBatchMutation.isPending ? (
-                <>Generating Personalized Drafts with Gemini...</>
+                <>Composing Deterministic Copy...</>
               ) : (
                 <>
-                  <Sparkles className="h-4 w-4" />
-                  Generate Drafts & Queue for Approval
+                  <FileText className="h-4 w-4" />
+                  {batchMode ? `Compose ${selectedBatchIds.length} Drafts` : 'Compose Email Draft'}
                   <ArrowRight className="h-4 w-4" />
                 </>
               )}
@@ -273,41 +367,152 @@ export const Generator: React.FC = () => {
           </div>
         </div>
 
-        {/* Informational Guidance Panel */}
-        <div className="space-y-4">
-          <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 space-y-3">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-              <HelpCircle className="h-4 w-4 text-brand-400" />
-              Category-Aware Intelligence
-            </h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Gemini automatically personalizes tone, vocabulary, and length according to each recipient's designated category:
-            </p>
-            <div className="space-y-2 text-xs">
-              <div className="p-2.5 rounded-xl bg-slate-800/50 border border-slate-800">
-                <span className="font-semibold text-slate-200">ENTERPRISE:</span>
-                <span className="text-slate-400 ml-1">ROI-focused, security, executive efficiency.</span>
-              </div>
-              <div className="p-2.5 rounded-xl bg-slate-800/50 border border-slate-800">
-                <span className="font-semibold text-slate-200">STARTUP:</span>
-                <span className="text-slate-400 ml-1">Speed, execution, high-energy, value-first.</span>
-              </div>
-              <div className="p-2.5 rounded-xl bg-slate-800/50 border border-slate-800">
-                <span className="font-semibold text-slate-200">INVESTOR:</span>
-                <span className="text-slate-400 ml-1">Market size, traction, concise metrics.</span>
-              </div>
+        {/* Right Form: Live Editor & SlopMonster Scorecard */}
+        <div className="lg:col-span-7 space-y-5">
+          <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <FileText className="h-4 w-4 text-brand-400" />
+                Email Draft & Quality Verification
+              </h3>
+              {slopResult && (
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`text-xs font-bold px-2.5 py-1 rounded-full border ${
+                      slopResult.clean
+                        ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                        : 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                    }`}
+                  >
+                    Slop Score: {slopResult.score}/5.0 {slopResult.clean ? 'CLEAN' : 'FLAGGED'}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Subject Line */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                Subject Line
+              </label>
+              <input
+                type="text"
+                value={subjectText}
+                onChange={(e) => setSubjectText(e.target.value)}
+                placeholder="Subject line will appear here after composition..."
+                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white focus:outline-none focus:border-brand-500 font-medium"
+              />
+            </div>
+
+            {/* Body Text */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                Email Body Text
+              </label>
+              <textarea
+                rows={9}
+                value={bodyText}
+                onChange={(e) => setBodyText(e.target.value)}
+                placeholder="Composed email body will appear here. You can manually edit any sentence freely..."
+                className="w-full p-3.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white focus:outline-none focus:border-brand-500 font-sans leading-relaxed"
+              />
+            </div>
+
+            {/* SlopMonster Action Controls */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+              <button
+                type="button"
+                onClick={handleManualSlopCheck}
+                disabled={isCheckingSlop || !bodyText.trim()}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center gap-2 transition-all disabled:opacity-50"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${isCheckingSlop ? 'animate-spin text-brand-400' : ''}`} />
+                Check Copy Quality with SlopMonster
+              </button>
+
+              {activeDraft && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => approveDraftMutation.mutate({ id: activeDraft.id, sendImmediately: false })}
+                    disabled={approveDraftMutation.isPending}
+                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-all shadow-md"
+                  >
+                    Approve Draft
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => approveDraftMutation.mutate({ id: activeDraft.id, sendImmediately: true })}
+                    disabled={approveDraftMutation.isPending}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-all shadow-md shadow-emerald-600/20"
+                  >
+                    <Send className="h-3.5 w-3.5" />
+                    Approve & Send via Gmail
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5 mb-2">
-              <CheckCircle2 className="h-4 w-4" />
-              Human Guardrail Guarantee
-            </h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Every draft generated here is placed in the <span className="text-amber-400 font-semibold">PENDING_APPROVAL</span> state. You maintain 100% control to review, edit, or reject before any email touches the Gmail API.
-            </p>
-          </div>
+          {/* SlopMonster Findings Card */}
+          {slopResult && (
+            <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+                  <ShieldCheck className="h-4 w-4 text-brand-400" />
+                  SlopMonster Local Editorial Audit
+                </span>
+                <span className="text-xs text-slate-400 font-mono">
+                  {slopResult.wordCount} words | {slopResult.totalFlags} flag(s)
+                </span>
+              </div>
+
+              {/* Category Pills */}
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-1 text-center">
+                <div className="p-2 rounded-xl bg-slate-800/50 border border-slate-800">
+                  <div className="text-[10px] text-slate-400 font-medium">Vocab</div>
+                  <div className={`text-sm font-bold ${slopResult.flagsByCategory.vocab > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                    {slopResult.flagsByCategory.vocab}
+                  </div>
+                </div>
+                <div className="p-2 rounded-xl bg-slate-800/50 border border-slate-800">
+                  <div className="text-[10px] text-slate-400 font-medium">Phrases</div>
+                  <div className={`text-sm font-bold ${slopResult.flagsByCategory.phrases > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                    {slopResult.flagsByCategory.phrases}
+                  </div>
+                </div>
+                <div className="p-2 rounded-xl bg-slate-800/50 border border-slate-800">
+                  <div className="text-[10px] text-slate-400 font-medium">Punctuation</div>
+                  <div className={`text-sm font-bold ${slopResult.flagsByCategory.punctuation > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                    {slopResult.flagsByCategory.punctuation}
+                  </div>
+                </div>
+                <div className="p-2 rounded-xl bg-slate-800/50 border border-slate-800">
+                  <div className="text-[10px] text-slate-400 font-medium">Rhythm</div>
+                  <div className={`text-sm font-bold ${slopResult.flagsByCategory.rhythm > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                    {slopResult.flagsByCategory.rhythm}
+                  </div>
+                </div>
+                <div className="p-2 rounded-xl bg-slate-800/50 border border-slate-800">
+                  <div className="text-[10px] text-slate-400 font-medium">Proof</div>
+                  <div className={`text-sm font-bold ${slopResult.flagsByCategory.proof > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                    {slopResult.flagsByCategory.proof}
+                  </div>
+                </div>
+              </div>
+
+              {/* Raw report / Findings */}
+              {slopResult.rawReport && (
+                <div className="mt-3 p-3 rounded-xl bg-slate-950/60 border border-slate-800 font-mono text-[11px] text-slate-300 whitespace-pre-wrap max-h-40 overflow-y-auto">
+                  {slopResult.rawReport}
+                </div>
+              )}
+
+              <p className="text-[11px] text-slate-500 italic pt-1">
+                Note: SlopMonster provides local editorial quality feedback against AI writing patterns and tells. It is not an anti-spam bypass guarantee.
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </div>

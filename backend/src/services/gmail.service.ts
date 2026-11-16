@@ -4,19 +4,22 @@ import { GoogleOAuthService } from './googleOAuth.service';
 import { buildRawEmail } from '../utils/emailBuilder';
 import { logger } from '../utils/logger';
 import { logAudit } from '../utils/auditLogger';
-import { SendEmailResult } from '../types';
 
 export class GmailService {
   /**
-   * Sends an email via Gmail API with strict multi-user tenant checks and human approval enforcement.
+   * Dispatches an approved email via the user's authentic Gmail OAuth connection.
+   * Enforces tenant isolation, explicit human approval, suppression list verification,
+   * duplicate prevention, and accurate GMAIL_ACCEPTED dispatch tracking.
    */
-  public static async sendApprovedEmail(generatedEmailId: string, userId: string): Promise<SendEmailResult> {
+  public static async sendApprovedEmail(generatedEmailId: string, userId: string) {
     const emailRecord = await prisma.generatedEmail.findUnique({
       where: { id: generatedEmailId },
       include: {
         recipient: true,
         campaign: true,
-        user: true,
+        user: {
+          select: { id: true, status: true, email: true, fullName: true },
+        },
       },
     });
 
@@ -26,22 +29,41 @@ export class GmailService {
 
     // 1. Strict Tenant Isolation Check
     if (emailRecord.userId !== userId) {
-      throw new Error('Tenant Violation: Unauthorized attempt to send email belonging to another user.');
+      throw new Error('Tenant Violation: Unauthorized attempt to access another user\'s email.');
     }
 
     // 2. Strict Account Active Check
     if (emailRecord.user.status !== 'ACTIVE') {
-      throw new Error('Account Deactivated: Inactive accounts cannot send emails.');
+      throw new Error('Account Deactivated: Inactive accounts cannot dispatch emails.');
     }
 
-    // 3. Strict Human Approval Check
-    if (emailRecord.approvalStatus !== 'APPROVED') {
+    // 3. Strict Human Approval Gate Check
+    const isApproved =
+      emailRecord.status === 'APPROVED' || emailRecord.approvalStatus === 'APPROVED';
+
+    if (!isApproved) {
       throw new Error(
-        `Safety Guardrail Violation: Email status is "${emailRecord.approvalStatus}". Explicit approval is required before sending.`
+        `Safety Guardrail Violation: Email status is "${emailRecord.status || emailRecord.approvalStatus}". Explicit approval is required before sending.`
       );
     }
 
-    // 4. Suppression List Check
+    // 4. Duplicate Dispatch Prevention
+    const alreadySent = await prisma.sentEmail.findFirst({
+      where: {
+        userId,
+        recipientId: emailRecord.recipientId,
+        subject: emailRecord.subject,
+        status: 'GMAIL_ACCEPTED',
+      },
+    });
+
+    if (alreadySent && alreadySent.gmailMessageId) {
+      throw new Error(
+        `Duplicate Prevention: An email with identical subject was already dispatched to ${emailRecord.recipient.email} (Gmail ID: ${alreadySent.gmailMessageId}).`
+      );
+    }
+
+    // 5. Suppression List Verification
     const isSuppressed = await prisma.suppressionEntry.findUnique({
       where: {
         userId_email: {
@@ -69,96 +91,118 @@ export class GmailService {
       };
     }
 
-    try {
-      // 5. User-Specific Gmail Connection
-      const { oauth2Client, senderEmail, senderName } = await GoogleOAuthService.getAuthorizedClient(userId);
-      const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+    // 6. User-Specific Authenticated Gmail Client
+    const { oauth2Client, senderEmail, senderName } =
+      await GoogleOAuthService.getAuthorizedClient(userId);
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
-      // 6. Deliverability-Optimized RFC 5322 MIME Email
-      const raw = buildRawEmail({
-        to: emailRecord.recipient.email,
-        from: senderEmail,
-        fromName: senderName,
-        subject: emailRecord.subject,
-        bodyText: emailRecord.body,
-        bodyHtml: emailRecord.bodyHtml || undefined,
-      });
+    // 7. Deliverability-Optimized RFC 5322 MIME Email (Plain-Text + HTML)
+    const raw = buildRawEmail({
+      to: emailRecord.recipient.email,
+      from: senderEmail,
+      fromName: senderName,
+      subject: emailRecord.subject,
+      bodyText: emailRecord.body,
+      bodyHtml: emailRecord.bodyHtml || undefined,
+    });
 
-      logger.info(`Sending email ${generatedEmailId} to ${emailRecord.recipient.email} from ${senderEmail} (${senderName})...`);
+    logger.info(
+      `Dispatching email ${generatedEmailId} to ${emailRecord.recipient.email} from ${senderEmail} (${senderName})...`
+    );
 
-      const response = await gmail.users.messages.send({
-        userId: 'me',
-        requestBody: { raw },
-      });
+    // Bounded retry execution for transient network glitches
+    let lastError: any = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const response = await gmail.users.messages.send({
+          userId: 'me',
+          requestBody: { raw },
+        });
 
-      const messageId = response.data.id || undefined;
-      const threadId = response.data.threadId || undefined;
+        const messageId = response.data.id || undefined;
+        const threadId = response.data.threadId || undefined;
 
-      // 7. Record in SentEmail table
-      const sentRecord = await prisma.sentEmail.create({
-        data: {
-          userId,
-          campaignId: emailRecord.campaignId,
-          recipientId: emailRecord.recipientId,
-          subject: emailRecord.subject,
-          gmailMessageId: messageId,
-          gmailThreadId: threadId,
-          status: 'SENT',
-          sentAt: new Date(),
-        },
-      });
+        // 8. Record in SentEmail table as GMAIL_ACCEPTED (never falsely claim "Inbox Delivery")
+        const sentRecord = await prisma.sentEmail.create({
+          data: {
+            userId,
+            campaignId: emailRecord.campaignId,
+            recipientId: emailRecord.recipientId,
+            subject: emailRecord.subject,
+            gmailMessageId: messageId,
+            gmailThreadId: threadId,
+            status: 'GMAIL_ACCEPTED',
+            sentAt: new Date(),
+          },
+        });
 
-      // Update GeneratedEmail approval status
-      await prisma.generatedEmail.update({
-        where: { id: generatedEmailId },
-        data: { approvalStatus: 'SENT' },
-      });
+        // Update GeneratedEmail status
+        await prisma.generatedEmail.update({
+          where: { id: generatedEmailId },
+          data: {
+            status: 'GMAIL_ACCEPTED',
+            approvalStatus: 'GMAIL_ACCEPTED',
+            sentAt: new Date(),
+          },
+        });
 
-      // 8. Audit Log
-      await logAudit({
-        actorUserId: userId,
-        action: 'EMAIL_SENT',
-        targetUserId: userId,
-        metadata: {
-          generatedEmailId,
-          sentEmailId: sentRecord.id,
-          to: emailRecord.recipient.email,
-          senderEmail,
-          gmailMessageId: messageId,
-        },
-      });
+        // 9. Audit Log
+        await logAudit({
+          actorUserId: userId,
+          action: 'GMAIL_DISPATCH_ACCEPTED',
+          targetUserId: userId,
+          metadata: {
+            generatedEmailId,
+            sentEmailId: sentRecord.id,
+            to: emailRecord.recipient.email,
+            senderEmail,
+            gmailMessageId: messageId,
+          },
+        });
 
-      logger.info(`Email ${generatedEmailId} sent successfully via Gmail. MessageId: ${messageId}`);
-      return { success: true, messageId, threadId };
-    } catch (error: any) {
-      logger.error(`Failed to send email ${generatedEmailId}:`, error);
+        logger.info(
+          `Email ${generatedEmailId} accepted by Gmail API for dispatch. MessageId: ${messageId}`
+        );
 
-      await prisma.sentEmail.create({
-        data: {
-          userId,
-          campaignId: emailRecord.campaignId,
-          recipientId: emailRecord.recipientId,
-          subject: emailRecord.subject,
-          status: 'FAILED',
-          errorMessage: error.message || 'Unknown Gmail API error',
-        },
-      });
-
-      await logAudit({
-        actorUserId: userId,
-        action: 'EMAIL_SENDING_FAILED',
-        targetUserId: userId,
-        metadata: {
-          generatedEmailId,
-          to: emailRecord.recipient.email,
-          error: error.message,
-        },
-      });
-
-      return {
-        success: false,
-        error: error.message || 'Gmail sending failed',
-      };
+        return {
+          success: true,
+          status: 'GMAIL_ACCEPTED',
+          messageId,
+          threadId,
+          deliveryDisclaimer:
+            'Accepted by Gmail API for dispatch. Inbox placement is determined by recipient email providers.',
+        };
+      } catch (err: any) {
+        lastError = err;
+        logger.warn(`Gmail API send attempt ${attempt}/3 failed: ${err.message}`);
+        if (attempt < 3) {
+          await new Promise((r) => setTimeout(r, 1500 * attempt));
+        }
+      }
     }
+
+    // If all retries failed
+    logger.error(`Failed to dispatch email ${generatedEmailId} after 3 attempts:`, lastError);
+
+    await prisma.sentEmail.create({
+      data: {
+        userId,
+        campaignId: emailRecord.campaignId,
+        recipientId: emailRecord.recipientId,
+        subject: emailRecord.subject,
+        status: 'FAILED',
+        errorMessage: lastError?.message || 'Gmail dispatch failed',
+      },
+    });
+
+    await prisma.generatedEmail.update({
+      where: { id: generatedEmailId },
+      data: {
+        status: 'FAILED',
+        approvalStatus: 'FAILED',
+      },
+    });
+
+    throw new Error(`Gmail API dispatch failed: ${lastError?.message || 'Unknown error'}`);
   }
 }

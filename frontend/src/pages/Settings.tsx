@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Settings as SettingsIcon,
@@ -13,9 +13,14 @@ import {
   User,
   KeyRound,
   Check,
+  UserCheck,
+  Save,
+  Globe,
+  FileCode
 } from 'lucide-react';
-import { googleAuthApi, authApi } from '../services/api';
+import { googleAuthApi, authApi, profileApi } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { UserProfile } from '../types';
 
 export const Settings: React.FC = () => {
   const queryClient = useQueryClient();
@@ -29,7 +34,56 @@ export const Settings: React.FC = () => {
   const [pwSuccess, setPwSuccess] = useState<string | null>(null);
   const [isUpdatingPw, setIsUpdatingPw] = useState(false);
 
-  const { data: googleStatus, isLoading } = useQuery({
+  // Profile Form state (10 fields)
+  const [profileForm, setProfileForm] = useState<Partial<UserProfile>>({
+    fullName: '',
+    professionalTitle: '',
+    location: '',
+    shortBio: '',
+    skills: '',
+    servicesOffered: '',
+    portfolioUrl: '',
+    linkedinUrl: '',
+    githubUrl: '',
+    signature: '',
+    writingStyle: '',
+  });
+  const [profileSavedMsg, setProfileSavedMsg] = useState<string | null>(null);
+
+  const { data: userProfile, isLoading: isProfileLoading } = useQuery<UserProfile>({
+    queryKey: ['userProfile'],
+    queryFn: profileApi.getProfile,
+  });
+
+  useEffect(() => {
+    if (userProfile) {
+      setProfileForm({
+        fullName: userProfile.fullName || '',
+        professionalTitle: userProfile.professionalTitle || '',
+        location: userProfile.location || '',
+        shortBio: userProfile.shortBio || '',
+        skills: userProfile.skills || '',
+        servicesOffered: userProfile.servicesOffered || '',
+        portfolioUrl: userProfile.portfolioUrl || '',
+        linkedinUrl: userProfile.linkedinUrl || '',
+        githubUrl: userProfile.githubUrl || '',
+        signature: userProfile.signature || '',
+        writingStyle: userProfile.writingStyle || '',
+      });
+    }
+  }, [userProfile]);
+
+  const updateProfileMutation = useMutation({
+    mutationFn: profileApi.updateProfile,
+    onSuccess: (updated) => {
+      queryClient.setQueryData(['userProfile'], updated);
+      setProfileSavedMsg('Profile successfully saved! Deterministic templates will use your updated details.');
+      refreshUser();
+      setTimeout(() => setProfileSavedMsg(null), 4000);
+    },
+  });
+
+  const { data: googleStatus } = useQuery({
     queryKey: ['googleStatus'],
     queryFn: googleAuthApi.getStatus,
   });
@@ -77,19 +131,24 @@ export const Settings: React.FC = () => {
     }
   };
 
+  const handleProfileSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    updateProfileMutation.mutate(profileForm);
+  };
+
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2.5">
           <SettingsIcon className="h-6 w-6 text-brand-400" />
-          Workspace Profile & Integrations
+          Sender Profile & Workspace Configuration
         </h1>
         <p className="text-sm text-slate-400 mt-1">
-          Review your employee credentials, connected Gmail account, security settings, and platform guardrails.
+          Manage your verified sender persona, Gmail OAuth credentials, and local SlopMonster quality settings.
         </p>
       </div>
 
-      {/* User Profile Card */}
+      {/* User Account Bar */}
       <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
           <div className="flex items-center gap-3.5">
@@ -182,6 +241,164 @@ export const Settings: React.FC = () => {
         )}
       </div>
 
+      {/* 10-Field Personal Profile Management Form */}
+      <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 space-y-5">
+        <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+          <div>
+            <h2 className="text-base font-bold text-white flex items-center gap-2">
+              <UserCheck className="h-5 w-5 text-brand-400" />
+              Sender Profile Details (10 Fields)
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              These details are substituted deterministically into templates. No AI hallucination or fabricated achievements.
+            </p>
+          </div>
+          {profileSavedMsg && (
+            <span className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5 bg-emerald-500/10 px-3 py-1 rounded-lg border border-emerald-500/20">
+              <CheckCircle2 className="h-4 w-4" />
+              Saved
+            </span>
+          )}
+        </div>
+
+        <form onSubmit={handleProfileSubmit} className="space-y-4 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block font-semibold text-slate-300 mb-1">1. Full Name</label>
+              <input
+                type="text"
+                required
+                value={profileForm.fullName || ''}
+                onChange={(e) => setProfileForm({ ...profileForm, fullName: e.target.value })}
+                className="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold text-slate-300 mb-1">2. Professional Title</label>
+              <input
+                type="text"
+                value={profileForm.professionalTitle || ''}
+                onChange={(e) => setProfileForm({ ...profileForm, professionalTitle: e.target.value })}
+                placeholder="e.g. Full-Stack Software Engineer"
+                className="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block font-semibold text-slate-300 mb-1">3. Location</label>
+              <input
+                type="text"
+                value={profileForm.location || ''}
+                onChange={(e) => setProfileForm({ ...profileForm, location: e.target.value })}
+                placeholder="e.g. Remote / San Francisco, CA"
+                className="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold text-slate-300 mb-1">4. Writing Style Preference</label>
+              <input
+                type="text"
+                value={profileForm.writingStyle || ''}
+                onChange={(e) => setProfileForm({ ...profileForm, writingStyle: e.target.value })}
+                placeholder="e.g. Direct, concise, professional"
+                className="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block font-semibold text-slate-300 mb-1">5. Short Bio</label>
+            <textarea
+              rows={2}
+              value={profileForm.shortBio || ''}
+              onChange={(e) => setProfileForm({ ...profileForm, shortBio: e.target.value })}
+              placeholder="A brief 1-2 sentence overview of your technical background..."
+              className="w-full p-3 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block font-semibold text-slate-300 mb-1">6. Skills (Comma-separated)</label>
+              <textarea
+                rows={2}
+                value={profileForm.skills || ''}
+                onChange={(e) => setProfileForm({ ...profileForm, skills: e.target.value })}
+                placeholder="TypeScript, React, Node.js, Java, Spring Boot, PostgreSQL..."
+                className="w-full p-3 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold text-slate-300 mb-1">7. Services Offered</label>
+              <textarea
+                rows={2}
+                value={profileForm.servicesOffered || ''}
+                onChange={(e) => setProfileForm({ ...profileForm, servicesOffered: e.target.value })}
+                placeholder="Custom web applications, REST APIs, frontend engineering..."
+                className="w-full p-3 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block font-semibold text-slate-300 mb-1">8. Portfolio URL</label>
+              <input
+                type="url"
+                value={profileForm.portfolioUrl || ''}
+                onChange={(e) => setProfileForm({ ...profileForm, portfolioUrl: e.target.value })}
+                placeholder="https://github.com/username"
+                className="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold text-slate-300 mb-1">9. LinkedIn URL</label>
+              <input
+                type="url"
+                value={profileForm.linkedinUrl || ''}
+                onChange={(e) => setProfileForm({ ...profileForm, linkedinUrl: e.target.value })}
+                placeholder="https://linkedin.com/in/username"
+                className="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold text-slate-300 mb-1">GitHub URL</label>
+              <input
+                type="url"
+                value={profileForm.githubUrl || ''}
+                onChange={(e) => setProfileForm({ ...profileForm, githubUrl: e.target.value })}
+                placeholder="https://github.com/username"
+                className="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block font-semibold text-slate-300 mb-1">10. Default Sender Signature</label>
+            <textarea
+              rows={3}
+              value={profileForm.signature || ''}
+              onChange={(e) => setProfileForm({ ...profileForm, signature: e.target.value })}
+              placeholder="Best regards,&#10;Your Name&#10;Full-Stack Engineer"
+              className="w-full p-3 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white font-mono"
+            />
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <button
+              type="submit"
+              disabled={updateProfileMutation.isPending}
+              className="px-5 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs uppercase tracking-wider transition-all shadow-md flex items-center gap-2"
+            >
+              <Save className="h-4 w-4" />
+              {updateProfileMutation.isPending ? 'Saving...' : 'Save Sender Profile'}
+            </button>
+          </div>
+        </form>
+      </div>
+
       {/* Google OAuth Section */}
       <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-800">
@@ -259,10 +476,6 @@ export const Settings: React.FC = () => {
             <span className="font-mono text-emerald-400">https://www.googleapis.com/auth/gmail.send</span>
           </div>
           <div className="flex items-center justify-between p-3 rounded-xl bg-slate-800/30 border border-slate-800">
-            <span className="text-slate-400">Configured Redirect URI:</span>
-            <span className="font-mono text-slate-300">http://localhost:5000/api/auth/google/callback</span>
-          </div>
-          <div className="flex items-center justify-between p-3 rounded-xl bg-slate-800/30 border border-slate-800">
             <span className="text-slate-400">Connected Gmail Address:</span>
             <span className="font-mono font-semibold text-white">
               {googleStatus?.account?.email || 'Not connected yet'}
@@ -271,19 +484,19 @@ export const Settings: React.FC = () => {
         </div>
       </div>
 
-      {/* Cloud & AI Subsystems */}
+      {/* Local SlopMonster & Database Architecture */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 space-y-3 text-xs">
           <div className="flex items-center gap-2.5 pb-2 border-b border-slate-800">
-            <Key className="h-4 w-4 text-brand-400" />
-            <h3 className="font-bold text-white text-sm">Google Gemini AI Engine</h3>
+            <ShieldCheck className="h-4 w-4 text-brand-400" />
+            <h3 className="font-bold text-white text-sm">SlopMonster Quality Engine</h3>
           </div>
           <p className="text-slate-400 leading-relaxed">
-            Connected via official Google Generative AI SDK (<code className="text-brand-300 font-mono">@google/generative-ai</code>). Generates deliverability-compliant outreach copy tailored to recipient categories.
+            Running locally via Python 3 (<code className="text-brand-300 font-mono">tools/deslop.py</code>). Flags AI writing patterns, corporate buzzwords, and syntactical tells with zero external API calls.
           </p>
           <div className="flex items-center justify-between pt-2 text-slate-300">
-            <span>Model Pinned:</span>
-            <span className="font-mono text-indigo-400">gemini-3.8-flash</span>
+            <span>Execution Runtime:</span>
+            <span className="font-mono text-emerald-400">Local Python 3 (Free)</span>
           </div>
         </div>
 

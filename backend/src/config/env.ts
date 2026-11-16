@@ -18,7 +18,7 @@ const envSchema = z.object({
   GOOGLE_REDIRECT_URI: z.string().default('http://localhost:5000/api/auth/google/callback'),
   GOOGLE_SCOPES: z.string().default('https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile'),
   
-  GEMINI_API_KEY: z.string().min(1, 'GEMINI_API_KEY is required'),
+  PYTHON_PATH: z.string().default('python'),
   
   TOKEN_ENCRYPTION_KEY: z.string().min(32, 'TOKEN_ENCRYPTION_KEY must be at least 32 characters'),
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),

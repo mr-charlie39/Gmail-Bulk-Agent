@@ -6,6 +6,9 @@ import {
   AdminCampaignOverview,
   AuditLog,
   User,
+  UserProfile,
+  EmailTemplate,
+  SlopMonsterResult,
 } from '../types';
 
 const API_BASE = import.meta.env.VITE_API_URL
@@ -193,4 +196,27 @@ export const suppressionApi = {
   list: () => api.get('/suppression').then((r) => r.data),
   add: (email: string, reason?: string) => api.post('/suppression', { email, reason }).then((r) => r.data),
   remove: (email: string) => api.delete('/suppression', { data: { email } }).then((r) => r.data),
+};
+
+// ----------------- Personal Profile API -----------------
+export const profileApi = {
+  getProfile: (): Promise<UserProfile> => api.get('/profile').then((r) => r.data),
+  updateProfile: (data: Partial<UserProfile>): Promise<UserProfile> => api.put('/profile', data).then((r) => r.data),
+};
+
+// ----------------- Deterministic Template & SlopMonster Composer API -----------------
+export const composerApi = {
+  getTemplates: (): Promise<EmailTemplate[]> => api.get('/composer/templates').then((r) => r.data),
+  createTemplate: (data: any): Promise<EmailTemplate> => api.post('/composer/templates', data).then((r) => r.data),
+  deleteTemplate: (id: string): Promise<any> => api.delete(`/composer/templates/${id}`).then((r) => r.data),
+  generateDraft: (params: { recipientId: string; templateKeyOrId?: string; customInstructions?: string; campaignId?: string }): Promise<any> =>
+    api.post('/composer/generate', params).then((r) => r.data),
+  batchGenerate: (params: { recipientIds: string[]; templateKeyOrId?: string; customInstructions?: string; campaignId?: string }): Promise<any> =>
+    api.post('/composer/batch-generate', params).then((r) => r.data),
+  checkCopyQuality: (data: { subject?: string; bodyText?: string; text?: string; allowProof?: boolean }): Promise<SlopMonsterResult> =>
+    api.post('/composer/check-slop', data).then((r) => r.data),
+  updateDraft: (id: string, data: { subject?: string; bodyText?: string; allowProof?: boolean }): Promise<any> =>
+    api.put(`/composer/drafts/${id}`, data).then((r) => r.data),
+  approveDraft: (id: string, sendImmediately = false): Promise<any> =>
+    api.post(`/composer/drafts/${id}/approve`, { sendImmediately }).then((r) => r.data),
 };

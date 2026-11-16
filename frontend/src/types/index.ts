@@ -129,8 +129,11 @@ export interface EmailMessage {
   subject: string;
   bodyHtml: string;
   bodyText: string;
-  status: 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'QUEUED' | 'SENT' | 'FAILED' | 'REJECTED';
+  status: 'DRAFT' | 'QUALITY_CHECKED' | 'APPROVED' | 'QUEUED' | 'GMAIL_ACCEPTED' | 'SENT' | 'FAILED' | 'BOUNCED' | 'CANCELLED' | 'PENDING_APPROVAL' | 'REJECTED';
   rejectionReason?: string;
+  slopScore?: number;
+  slopClean?: boolean;
+  slopReport?: string;
   gmailMessageId?: string;
   gmailThreadId?: string;
   sentAt?: string;
@@ -145,6 +148,53 @@ export interface EmailMessage {
     metadata: any;
     timestamp: string;
   }[];
+}
+
+export interface UserProfile {
+  id: string;
+  userId: string;
+  fullName: string;
+  professionalTitle?: string;
+  location?: string;
+  shortBio?: string;
+  skills?: string;
+  servicesOffered?: string;
+  portfolioUrl?: string;
+  linkedinUrl?: string;
+  githubUrl?: string;
+  signature?: string;
+  writingStyle?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface EmailTemplate {
+  id: string;
+  name: string;
+  category: string;
+  description?: string;
+  subjectTemplate: string;
+  openingSentence?: string;
+  reasonForContact: string;
+  relevantService: string;
+  portfolioInfo?: string;
+  naturalClosing?: string;
+  isCustom?: boolean;
+}
+
+export interface SlopMonsterResult {
+  score: number;
+  clean: boolean;
+  wordCount: number;
+  flagsByCategory: {
+    vocab: number;
+    phrases: number;
+    punctuation: number;
+    rhythm: number;
+    proof: number;
+  };
+  totalFlags: number;
+  rawReport: string;
 }
 
 export interface AnalyticsOverview {
